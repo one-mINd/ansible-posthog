@@ -1,0 +1,6 @@
+---
+# defaults file for ansible-posthog
+posthog_directory: /etc/posthog
+posthog_secret: None
+posthog_encryption_salt_keys: None # openssl rand -hex 16
+posthog_domain: posthog.unitpay.ru

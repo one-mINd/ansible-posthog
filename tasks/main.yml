@@ -1,0 +1,59 @@
+---
+- name: Install requirements
+  ansible.builtin.apt:
+    name: "{{ item }}"
+    state: present
+    update_cache: true
+  loop:
+    - curl
+    - ca-certificates
+    - brotli
+
+- name: Clone a public Git repository
+  ansible.builtin.git:
+    repo: 'https://github.com/PostHog/posthog.git'
+    dest: "{{ posthog_directory }}"
+    version: master 
+    clone: yes
+    update: yes
+
+- name: Get geolite2
+  ansible.builtin.shell: |
+    curl -L 'https://mmdbcdn.posthog.net/' --http1.1 | brotli --decompress --output={{ posthog_directory }}/share/GeoLite2-City.mmdb; 
+    echo '{\"date\": \"'$(date +%Y-%m-%d)'\"}' > {{ posthog_directory }}/share/GeoLite2-City.json; 
+    chmod 644 {{ posthog_directory }}/share/GeoLite2-City.mmdb; 
+    chmod 644 {{ posthog_directory }}/share/GeoLite2-City.json;
+
+- name: Create directory for entrypoints
+  ansible.builtin.file:
+    path: "{{ posthog_directory }}/compose"
+    state: directory
+
+- name: Ensure entrypoints files
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ posthog_directory }}/compose/{{ item }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - start
+    - temporal-django-worker
+    - wait
+
+- name: Ensure env file
+  ansible.builtin.template:
+    src: ".env.j2"
+    dest: "{{ posthog_directory }}/.env"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure compose files
+  ansible.builtin.command: |
+    cp {{ posthog_directory }}/docker-compose.hobby.yml {{ posthog_directory }}/docker-compose.yml
+
+- name: Start posthog
+  community.docker.docker_compose_v2:
+    project_src: "{{ posthog_directory }}"
+    state: present
