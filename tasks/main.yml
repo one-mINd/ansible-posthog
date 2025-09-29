@@ -9,10 +9,18 @@
     - ca-certificates
     - brotli
 
+- name: Create required directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+  loop:
+    - "{{ posthog_directory }}/compose"
+    - "{{ posthog_directory }}/share"
+
 - name: Clone a public Git repository
   ansible.builtin.git:
     repo: 'https://github.com/PostHog/posthog.git'
-    dest: "{{ posthog_directory }}"
+    dest: "{{ posthog_directory }}/posthog"
     version: master 
     clone: yes
     update: yes
@@ -23,11 +31,6 @@
     echo '{\"date\": \"'$(date +%Y-%m-%d)'\"}' > {{ posthog_directory }}/share/GeoLite2-City.json; 
     chmod 644 {{ posthog_directory }}/share/GeoLite2-City.mmdb; 
     chmod 644 {{ posthog_directory }}/share/GeoLite2-City.json;
-
-- name: Create directory for entrypoints
-  ansible.builtin.file:
-    path: "{{ posthog_directory }}/compose"
-    state: directory
 
 - name: Ensure entrypoints files
   ansible.builtin.template:
@@ -50,8 +53,9 @@
     mode: '0644'
 
 - name: Ensure compose files
-  ansible.builtin.command: |
-    cp {{ posthog_directory }}/docker-compose.hobby.yml {{ posthog_directory }}/docker-compose.yml
+  ansible.builtin.shell: |
+    cp {{ posthog_directory }}/posthog/docker-compose.hobby.yml {{ posthog_directory }}/docker-compose.yml
+    cp {{ posthog_directory }}/posthog/docker-compose.base.yml {{ posthog_directory }}/docker-compose.base.yml
 
 - name: Start posthog
   community.docker.docker_compose_v2:
