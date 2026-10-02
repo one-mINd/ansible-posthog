@@ -1,63 +1,141 @@
 ---
-- name: Install requirements
-  ansible.builtin.apt:
-    name: "{{ item }}"
-    state: present
-    update_cache: true
-  loop:
-    - curl
-    - ca-certificates
-    - brotli
+- name: Assert that required secrets are defined
+  ansible.builtin.assert:
+    that:
+      - posthog_secret | length > 0
+      - posthog_encryption_salt_keys | length > 0
+      - posthog_browserless_secret | length > 0
+    fail_msg: >-
+      Переменные posthog_secret, posthog_encryption_salt_keys и
+      posthog_browserless_secret должны быть заданы (обычно через vault).
+    quiet: true
 
-- name: Create required directories
+- name: Ensure posthog directory
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ posthog_install_dir }}"
     state: directory
-  loop:
-    - "{{ posthog_directory }}/compose"
-    - "{{ posthog_directory }}/share"
-
-- name: Clone a public Git repository
-  ansible.builtin.git:
-    repo: 'https://github.com/PostHog/posthog.git'
-    dest: "{{ posthog_directory }}/posthog"
-    version: master 
-    clone: yes
-    update: yes
-
-- name: Get geolite2
-  ansible.builtin.shell: |
-    curl -L 'https://mmdbcdn.posthog.net/' --http1.1 | brotli --decompress --output={{ posthog_directory }}/share/GeoLite2-City.mmdb; 
-    echo '{\"date\": \"'$(date +%Y-%m-%d)'\"}' > {{ posthog_directory }}/share/GeoLite2-City.json; 
-    chmod 644 {{ posthog_directory }}/share/GeoLite2-City.mmdb; 
-    chmod 644 {{ posthog_directory }}/share/GeoLite2-City.json;
-
-- name: Ensure entrypoints files
-  ansible.builtin.template:
-    src: "{{ item }}.j2"
-    dest: "{{ posthog_directory }}/compose/{{ item }}"
-    owner: root
-    group: root
     mode: '0755'
-  loop:
-    - start
-    - temporal-django-worker
-    - wait
 
-- name: Ensure env file
+- name: Clone PostHog repository
+  ansible.builtin.git:
+    repo: https://github.com/PostHog/posthog.git
+    dest: "{{ posthog_install_dir }}"
+    version: master
+    depth: 1
+    single_branch: true
+    update: true
+    force: true
+
+- name: Check if .env file exists
+  ansible.builtin.stat:
+    path: "{{ posthog_install_dir }}/.env"
+  register: posthog_env_file
+
+- name: Generate .env file from template
   ansible.builtin.template:
-    src: ".env.j2"
-    dest: "{{ posthog_directory }}/.env"
-    owner: root
-    group: root
+    src: env.j2
+    dest: "{{ posthog_install_dir }}/.env"
+    mode: '0600'
+  when: not posthog_env_file.stat.exists
+  notify: Restart PostHog stack
+
+- name: Ensure share directory exists
+  ansible.builtin.file:
+    path: "{{ posthog_install_dir }}/share"
+    state: directory
+    mode: '0755'
+
+- name: Ensure compose directory exists
+  ansible.builtin.file:
+    path: "{{ posthog_install_dir }}/compose"
+    state: directory
+    mode: '0755'
+
+- name: Write compose/start
+  ansible.builtin.copy:
+    dest: "{{ posthog_install_dir }}/compose/start"
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      ./compose/wait
+      ./bin/migrate
+      ./bin/docker-server
+
+- name: Write compose/wait
+  ansible.builtin.copy:
+    dest: "{{ posthog_install_dir }}/compose/wait"
+    mode: '0755'
+    content: |
+      #!/usr/bin/env python3
+
+      import socket
+      import time
+
+      def loop():
+          print("Waiting for ClickHouse and Postgres to be ready")
+          try:
+              with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                  s.connect(('clickhouse', 9000))
+              print("Clickhouse is ready")
+              with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                  s.connect(('db', 5432))
+              print("Postgres is ready")
+          except ConnectionRefusedError:
+              time.sleep(5)
+              loop()
+
+      loop()
+
+- name: Write compose/temporal-django-worker
+  ansible.builtin.copy:
+    dest: "{{ posthog_install_dir }}/compose/temporal-django-worker"
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      ./bin/temporal-django-worker
+
+- name: Download GeoLite2-City.mmdb
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -L 'https://mmdbcdn.posthog.net/' --http1.1 \
+      | brotli --decompress > {{ posthog_install_dir }}/share/GeoLite2-City.mmdb
+  args:
+    creates: "{{ posthog_install_dir }}/share/GeoLite2-City.mmdb"
+    executable: /bin/bash
+
+- name: Copy docker-compose.hobby.yml to docker-compose.yml
+  ansible.builtin.copy:
+    src: "{{ posthog_install_dir }}/docker-compose.hobby.yml"
+    dest: "{{ posthog_install_dir }}/docker-compose.yml"
+    remote_src: true
     mode: '0644'
 
-- name: Ensure compose files
-  ansible.builtin.shell: |
-    cp {{ posthog_directory }}/posthog/docker-compose.hobby.yml {{ posthog_directory }}/docker-compose.yml
-    cp {{ posthog_directory }}/posthog/docker-compose.base.yml {{ posthog_directory }}/docker-compose.base.yml
+- name: Fix paths in docker-compose.yml
+  ansible.builtin.replace:
+    path: "{{ posthog_install_dir }}/docker-compose.yml"
+    regexp: '\./posthog/'
+    replace: './'
+  notify: Restart PostHog stack
 
-- name: Start posthog
+- name: Change published HTTP port in docker-compose.yml
+  ansible.builtin.replace:
+    path: "{{ posthog_install_dir }}/docker-compose.yml"
+    regexp: '80:80'
+    replace: '{{ posthog_http_port }}:80'
+  notify: Restart PostHog stack
+
+- name: Change published HTTPS port in docker-compose.yml
+  ansible.builtin.replace:
+    path: "{{ posthog_install_dir }}/docker-compose.yml"
+    regexp: '443:443'
+    replace: '{{ posthog_https_port }}:443'
+  notify: Restart PostHog stack
+
+- name: Start PostHog stack
   community.docker.docker_compose_v2:
-    project_src: "{{ posthog_directory }}"
+    project_src: "{{ posthog_install_dir }}"
     state: present
+    pull: always
+    build: never
+    wait: true
+    wait_timeout: "{{ posthog_health_check_timeout }}"

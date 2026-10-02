@@ -1,6 +1,22 @@
 ---
-# defaults file for ansible-posthog
-posthog_directory: /etc/posthog
-posthog_secret: None
-posthog_encryption_salt_keys: None # openssl rand -hex 16
-posthog_domain: posthog.unitpay.ru
+posthog_app_tag: "latest"
+posthog_domain: ""
+posthog_registry_url: "posthog/posthog"
+
+posthog_install_dir: "/var/posthog"
+
+# Обязательные секреты. Сгенерировать: openssl rand -hex 32
+posthog_secret: ""
+posthog_encryption_salt_keys: ""
+posthog_browserless_secret: ""
+
+posthog_anthropic_api_key: ""
+posthog_openai_api_key: ""
+
+posthog_skip_health_check: false
+posthog_health_check_timeout: 600
+
+posthog_use_staging_tls: false
+
+posthog_http_port: 80
+posthog_https_port: 443
