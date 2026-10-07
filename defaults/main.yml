@@ -2,10 +2,14 @@
 posthog_app_tag: "latest"
 posthog_domain: ""
 posthog_registry_url: "posthog/posthog"
+# Git ref for compose/hobby files. Image tag is posthog_app_tag separately.
+posthog_git_sha: master
 
 posthog_install_dir: "/var/posthog"
 
 # Обязательные секреты. Сгенерировать: openssl rand -hex 32
+# После миграции с данными: SECRET_KEY и ENCRYPTION_SALT_KEYS должны
+# совпадать со старой базой, иначе почта и шифрополя не читаются.
 posthog_secret: ""
 posthog_encryption_salt_keys: ""
 posthog_browserless_secret: ""
@@ -16,7 +20,15 @@ posthog_openai_api_key: ""
 posthog_skip_health_check: false
 posthog_health_check_timeout: 600
 
+# false после миграции на уже накатанной схеме: штатный manage.py migrate
+# с непатченного latest падает на InvalidBasesError (posthog.1018 / squash).
+# true только для чистой установки.
+posthog_run_migrations_on_start: false
+
 posthog_use_staging_tls: false
+
+# Caddy site block Host. За ALB/Traefik нужен catch-all, иначе пустой 200.
+posthog_caddy_host: "http://:8000"
 
 posthog_http_port: 80
 posthog_https_port: 443
