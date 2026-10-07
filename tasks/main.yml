@@ -20,7 +20,7 @@
   ansible.builtin.git:
     repo: https://github.com/PostHog/posthog.git
     dest: "{{ posthog_install_dir }}"
-    version: master
+    version: "{{ posthog_git_sha }}"
     depth: 1
     single_branch: true
     update: true
@@ -39,6 +39,33 @@
   when: not posthog_env_file.stat.exists
   notify: Restart PostHog stack
 
+# Существующий .env не перезаписываем (секреты), но CADDY_HOST обязателен:
+# иначе за ALB Caddy отдаёт пустой HTTP 200 на несовпадающий Host.
+- name: Ensure CADDY_HOST in existing .env
+  ansible.builtin.lineinfile:
+    path: "{{ posthog_install_dir }}/.env"
+    regexp: '^CADDY_HOST='
+    line: 'CADDY_HOST="{{ posthog_caddy_host }}"'
+    mode: '0600'
+  when: posthog_env_file.stat.exists
+  notify: Restart PostHog stack
+
+- name: Ensure TLS_BLOCK in existing .env
+  ansible.builtin.lineinfile:
+    path: "{{ posthog_install_dir }}/.env"
+    regexp: '^TLS_BLOCK='
+    line: 'TLS_BLOCK='
+    mode: '0600'
+  when: posthog_env_file.stat.exists and not posthog_use_staging_tls
+
+- name: Ensure CADDY_TLS_BLOCK in existing .env
+  ansible.builtin.lineinfile:
+    path: "{{ posthog_install_dir }}/.env"
+    regexp: '^CADDY_TLS_BLOCK='
+    line: 'CADDY_TLS_BLOCK='
+    mode: '0600'
+  when: posthog_env_file.stat.exists
+
 - name: Ensure share directory exists
   ansible.builtin.file:
     path: "{{ posthog_install_dir }}/share"
@@ -52,14 +79,11 @@
     mode: '0755'
 
 - name: Write compose/start
-  ansible.builtin.copy:
+  ansible.builtin.template:
+    src: start.j2
     dest: "{{ posthog_install_dir }}/compose/start"
     mode: '0755'
-    content: |
-      #!/bin/bash
-      ./compose/wait
-      ./bin/migrate
-      ./bin/docker-server
+  notify: Restart PostHog stack
 
 - name: Write compose/wait
   ansible.builtin.copy:
@@ -137,5 +161,5 @@
     state: present
     pull: always
     build: never
-    wait: true
+    wait: "{{ not posthog_skip_health_check }}"
     wait_timeout: "{{ posthog_health_check_timeout }}"
