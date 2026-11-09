@@ -3,4 +3,4 @@
 {% if posthog_run_migrations_on_start %}
 ./bin/migrate
 {% endif %}
-./bin/docker-server
+exec ./bin/docker-server

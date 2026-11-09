@@ -4,16 +4,16 @@ Ansible-роль для self-hosted PostHog (hobby compose) на UnitPay.
 
 ## Операционные выводы после миграции на unitpay-tools-s1 (6–7 октября 2026)
 
-Полный отчёт: [docs/posthog-migration.html](docs/posthog-migration.html).
-
-Кратко, что закреплено в роли:
+Что закреплено в роли:
 
 | Параметр | Значение / поведение | Зачем |
 |---|---|---|
 | `posthog_caddy_host` | `http://:8000` | За ALB Host не совпадает с site block — иначе Caddy отдаёт пустой 200 |
+| `posthog_caddy_tls_block` | `""` | Глобальные опции Caddyfile; за traefik — `trusted_proxies`, иначе в PostHog нет IP пользователя и гео |
 | `posthog_run_migrations_on_start` | `false` | Штатный `./bin/migrate` с непатченного `latest` падает на `InvalidBasesError` |
 | `posthog_git_sha` | `master` | Checkout compose-файлов; тег образа задаётся отдельно через `posthog_app_tag` |
-| Существующий `.env` | Не перезаписывается | Секреты сохраняются; `CADDY_HOST` / TLS-блоки дописываются через `lineinfile` |
+| Существующий `.env` | Не перезаписывается | Секреты сохраняются; `CADDY_HOST`, TLS-блоки, `POSTHOG_APP_TAG`, `DOMAIN`, `REGISTRY_URL` и `posthog_env_extra` выставляются через `lineinfile` |
+| `posthog_compose_override` | `{}` | Содержимое `docker-compose.override.yml`; пустой словарь удаляет файл |
 
 ### Чего не делать на уже мигрированном инстансе
 
